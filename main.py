@@ -3518,45 +3518,86 @@ Thank you for your purchase!
 
 
 # ============ SET BOT COMMANDS ============
-async def set_bot_commands(application: Application):
-    default_commands = [
-        BotCommand("start", "Start the bot"),
-        BotCommand("menu", "Show main menu"),
-        BotCommand("shop", "Browse all items"),
-        BotCommand("buy", "Purchase item by ID"),
-        BotCommand("orders", "My orders"),
-        BotCommand("notifications", "View notifications"),
-        BotCommand("help", "Show help"),
-    ]
+# ============ SET BOT COMMANDS ============
+if USE_V20:
+    async def set_bot_commands(application: Application):
+        default_commands = [
+            BotCommand("start", "Start the bot"),
+            BotCommand("menu", "Show main menu"),
+            BotCommand("shop", "Browse all items"),
+            BotCommand("buy", "Purchase item by ID"),
+            BotCommand("orders", "My orders"),
+            BotCommand("notifications", "View notifications"),
+            BotCommand("help", "Show help"),
+        ]
 
-    admin_commands = [
-        BotCommand("addadmin", "Add new admin (master only)"),
-        BotCommand("removeadmin", "Remove admin (master only)"),
-        BotCommand("adminlogs", "View admin logs (master only)"),
-        BotCommand("addaccount", "Add account item"),
-        BotCommand("addfile", "Add digital file"),
-        BotCommand("pending", "View pending payments"),
-        BotCommand("announce", "Send announcement"),
-        BotCommand("promo", "Send promo"),
-        BotCommand("stats", "View bot stats"),
-        BotCommand("settings", "Bot settings"),
-        BotCommand("stock", "Manage product stock"),
-    ]
+        admin_commands = [
+            BotCommand("addadmin", "Add new admin (master only)"),
+            BotCommand("removeadmin", "Remove admin (master only)"),
+            BotCommand("adminlogs", "View admin logs (master only)"),
+            BotCommand("addaccount", "Add account item"),
+            BotCommand("addfile", "Add digital file"),
+            BotCommand("pending", "View pending payments"),
+            BotCommand("announce", "Send announcement"),
+            BotCommand("promo", "Send promo"),
+            BotCommand("stats", "View bot stats"),
+            BotCommand("settings", "Bot settings"),
+            BotCommand("stock", "Manage product stock"),
+        ]
 
-    await application.bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
+        await application.bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
 
-    for admin_id in storage.get_all_admins():
-        try:
-            await application.bot.set_my_commands(
-                default_commands + admin_commands,
-                scope=BotCommandScopeChat(chat_id=int(admin_id))
-            )
-            logger.info(f"✅ Admin commands set for {admin_id}")
-        except Exception as e:
-            logger.error(f"Failed to set admin commands for {admin_id}: {e}")
+        for admin_id in storage.get_all_admins():
+            try:
+                await application.bot.set_my_commands(
+                    default_commands + admin_commands,
+                    scope=BotCommandScopeChat(chat_id=int(admin_id))
+                )
+                logger.info(f"✅ Admin commands set for {admin_id}")
+            except Exception as e:
+                logger.error(f"Failed to set admin commands for {admin_id}: {e}")
 
-    logger.info("✅ Bot menu commands set with scoped permissions!")
-
+        logger.info("✅ Bot menu commands set with scoped permissions!")
+else:
+    async def set_bot_commands_compat(updater):
+        """Compatibility function for setting bot commands in older versions"""
+        default_commands = [
+            BotCommand("start", "Start the bot"),
+            BotCommand("menu", "Show main menu"),
+            BotCommand("shop", "Browse all items"),
+            BotCommand("buy", "Purchase item by ID"),
+            BotCommand("orders", "My orders"),
+            BotCommand("notifications", "View notifications"),
+            BotCommand("help", "Show help"),
+        ]
+        
+        admin_commands = [
+            BotCommand("addadmin", "Add new admin (master only)"),
+            BotCommand("removeadmin", "Remove admin (master only)"),
+            BotCommand("adminlogs", "View admin logs (master only)"),
+            BotCommand("addaccount", "Add account item"),
+            BotCommand("addfile", "Add digital file"),
+            BotCommand("pending", "View pending payments"),
+            BotCommand("announce", "Send announcement"),
+            BotCommand("promo", "Send promo"),
+            BotCommand("stats", "View bot stats"),
+            BotCommand("settings", "Bot settings"),
+            BotCommand("stock", "Manage product stock"),
+        ]
+        
+        await updater.bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
+        
+        for admin_id in storage.get_all_admins():
+            try:
+                await updater.bot.set_my_commands(
+                    default_commands + admin_commands,
+                    scope=BotCommandScopeChat(chat_id=int(admin_id))
+                )
+                logger.info(f"✅ Admin commands set for {admin_id}")
+            except Exception as e:
+                logger.error(f"Failed to set admin commands for {admin_id}: {e}")
+        
+        logger.info("✅ Bot menu commands set with scoped permissions!")
 
 # ============ MAIN ============
 def main():
@@ -3616,6 +3657,9 @@ def main():
     
     else:
         # Old version (v13-v19)
+        from telegram.ext import Updater, Filters
+        from telegram.ext import CallbackContext
+        
         updater = Updater(BOT_TOKEN)
         dispatcher = updater.dispatcher
         
@@ -3651,7 +3695,6 @@ def main():
         dispatcher.add_handler(MessageHandler(Filters.document, handlers.handle_media))
         
         # Set commands
-        import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(set_bot_commands_compat(updater))
@@ -3659,45 +3702,11 @@ def main():
         print("🤖 Bot Running")
         print(f"👑 Admin ID: {ADMIN_ID}")
         print(f"👥 Admins: {storage.get_all_admins()}")
+        print("✅ Bot is running in compatibility mode (older version)")
         
         updater.start_polling()
         updater.idle()
 
 
-async def set_bot_commands_compat(updater):
-    """Compatibility function for setting bot commands in older versions"""
-    default_commands = [
-        BotCommand("start", "Start the bot"),
-        BotCommand("menu", "Show main menu"),
-        BotCommand("shop", "Browse all items"),
-        BotCommand("buy", "Purchase item by ID"),
-        BotCommand("orders", "My orders"),
-        BotCommand("notifications", "View notifications"),
-        BotCommand("help", "Show help"),
-    ]
-    
-    admin_commands = [
-        BotCommand("addadmin", "Add new admin (master only)"),
-        BotCommand("removeadmin", "Remove admin (master only)"),
-        BotCommand("adminlogs", "View admin logs (master only)"),
-        BotCommand("addaccount", "Add account item"),
-        BotCommand("addfile", "Add digital file"),
-        BotCommand("pending", "View pending payments"),
-        BotCommand("announce", "Send announcement"),
-        BotCommand("promo", "Send promo"),
-        BotCommand("stats", "View bot stats"),
-        BotCommand("settings", "Bot settings"),
-        BotCommand("stock", "Manage product stock"),
-    ]
-    
-    await updater.bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
-    
-    for admin_id in storage.get_all_admins():
-        try:
-            await updater.bot.set_my_commands(
-                default_commands + admin_commands,
-                scope=BotCommandScopeChat(chat_id=int(admin_id))
-            )
-            logger.info(f"✅ Admin commands set for {admin_id}")
-        except Exception as e:
-            logger.error(f"Failed to set admin commands for {admin_id}: {e}")
+if __name__ == '__main__':
+    main()
