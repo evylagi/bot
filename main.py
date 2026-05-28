@@ -1,4 +1,5 @@
 import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 import json
 import os
 from datetime import datetime
@@ -8,15 +9,12 @@ import re
 
 # Try to import from new version (v20+)
 try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
     from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
     USE_V20 = True
 except ImportError:
     # Fallback for older version (v13-v19)
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-    from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
-    from telegram.ext import CallbackContext
+    from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
     from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
     USE_V20 = False
     
@@ -32,7 +30,7 @@ except ImportError:
         ALL = Filters.all
 
 # CONFIGURATION
-BOT_TOKEN = '8330163722:AAEv9Sj0EMT8cpRu9dtfsfVN7JSB0J9n_7A'
+BOT_TOKEN = '8096001615:AAED1k-QJJx6Yuo2RXYLIB4hBsYTEZ7lbmw'
 ADMIN_ID = 7354419969
 
 # Directories
@@ -3518,9 +3516,8 @@ Thank you for your purchase!
 
 
 # ============ SET BOT COMMANDS ============
-# ============ SET BOT COMMANDS ============
 if USE_V20:
-    async def set_bot_commands(application: Application):
+    async def set_bot_commands(application):
         default_commands = [
             BotCommand("start", "Start the bot"),
             BotCommand("menu", "Show main menu"),
@@ -3560,7 +3557,6 @@ if USE_V20:
         logger.info("✅ Bot menu commands set with scoped permissions!")
 else:
     async def set_bot_commands_compat(updater):
-        """Compatibility function for setting bot commands in older versions"""
         default_commands = [
             BotCommand("start", "Start the bot"),
             BotCommand("menu", "Show main menu"),
@@ -3638,7 +3634,7 @@ def main():
         app.add_handler(MessageHandler(filters.PHOTO, handlers.handle_media))
         app.add_handler(MessageHandler(filters.Document.ALL, handlers.handle_media))
         
-        async def post_init(application: Application):
+        async def post_init(application):
             await set_bot_commands(application)
         
         app.post_init = post_init
@@ -3699,10 +3695,9 @@ def main():
         asyncio.set_event_loop(loop)
         loop.run_until_complete(set_bot_commands_compat(updater))
         
-        print("🤖 Bot Running")
+        print("🤖 Bot Running (compatibility mode)")
         print(f"👑 Admin ID: {ADMIN_ID}")
         print(f"👥 Admins: {storage.get_all_admins()}")
-        print("✅ Bot is running in compatibility mode (older version)")
         
         updater.start_polling()
         updater.idle()
