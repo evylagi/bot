@@ -13,14 +13,11 @@ from functools import wraps
 import sys
 import threading
 
-# Add Flask for health check server
 try:
-    from flask import Flask
-    FLASK_AVAILABLE = True
+    from flask import Flask, jsonify
 except ImportError:
-    FLASK_AVAILABLE = False
-    print("Installing Flask for health checks...")
     os.system("pip install flask")
+    from flask import Flask, jsonify
 
 try:
     import uuid
@@ -29,8 +26,8 @@ except ImportError:
     UUID_AVAILABLE = False
 
 try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
-    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
     from telegram.constants import ChatType
     TELEGRAM_AVAILABLE = True
 except ImportError:
@@ -38,7 +35,7 @@ except ImportError:
     print("pip install python-telegram-bot")
     sys.exit(1)
 
-# Configure logging
+# Configure logging - minimal
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -49,23 +46,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration - Use environment variables for security
+# Configuration
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8330163722:AAEv9Sj0EMT8cpRu9dtfsfVN7JSB0J9n_7A")
 ADMIN_IDS = [int(id.strip()) for id in os.environ.get("ADMIN_IDS", "7716750398").split(",") if id.strip()]
 DB_FILE = "musicgpt_bot.json"
-DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
-MAX_RETRIES = 3
-RETRY_DELAY = 5
 REQUEST_TIMEOUT = 30
-PORT = int(os.environ.get("PORT", 8080))  # Render provides PORT env variable
+PORT = int(os.environ.get("PORT", 8080))
 
-# Create required directories
 os.makedirs("output", exist_ok=True)
-
-try:
-    import asyncio
-except ImportError:
-    import asyncio
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -78,16 +66,6 @@ def load_db():
 
 def save_db(data):
     try:
-        # Create backup before saving
-        if os.path.exists(DB_FILE):
-            try:
-                with open(DB_FILE, 'r') as f:
-                    old_data = json.load(f)
-                with open(f"{DB_FILE}.backup", 'w') as f:
-                    json.dump(old_data, f, indent=2, default=str)
-            except:
-                pass
-        
         with open(DB_FILE, 'w') as f:
             json.dump(data, f, indent=2, default=str)
     except Exception as e:
@@ -131,8 +109,7 @@ class Database:
             }
             save_db(data)
             return True
-        except Exception as e:
-            logger.error(f"Create user error: {e}")
+        except:
             return False
     
     @staticmethod
@@ -146,8 +123,8 @@ class Database:
                     if pending["user_id"] == user_id and pending["status"] == "pending":
                         pending["status"] = "approved"
                 save_db(data)
-        except Exception as e:
-            logger.error(f"Approve user error: {e}")
+        except:
+            pass
     
     @staticmethod
     def reject_user(user_id):
@@ -157,8 +134,8 @@ class Database:
                 if pending["user_id"] == user_id and pending["status"] == "pending":
                     pending["status"] = "rejected"
             save_db(data)
-        except Exception as e:
-            logger.error(f"Reject user error: {e}")
+        except:
+            pass
     
     @staticmethod
     def request_approval(user_id):
@@ -170,8 +147,8 @@ class Database:
                 "status": "pending"
             })
             save_db(data)
-        except Exception as e:
-            logger.error(f"Request approval error: {e}")
+        except:
+            pass
     
     @staticmethod
     def get_pending_approvals():
@@ -214,8 +191,8 @@ class Database:
                 "created_at": datetime.now().isoformat()
             })
             save_db(data)
-        except Exception as e:
-            logger.error(f"Add generation error: {e}")
+        except:
+            pass
     
     @staticmethod
     def update_session(user_id, authenticated, email, display, provider, token, user_id_api):
@@ -230,8 +207,8 @@ class Database:
                 data["users"][user_id_str]["access_token"] = token
                 data["users"][user_id_str]["musicgpt_user_id"] = user_id_api
                 save_db(data)
-        except Exception as e:
-            logger.error(f"Update session error: {e}")
+        except:
+            pass
     
     @staticmethod
     def update_last_audio(user_id, audio_id, title, filepath):
@@ -243,8 +220,8 @@ class Database:
                 data["users"][user_id_str]["last_title"] = title
                 data["users"][user_id_str]["last_filepath"] = filepath
                 save_db(data)
-        except Exception as e:
-            logger.error(f"Update last audio error: {e}")
+        except:
+            pass
     
     @staticmethod
     def get_session(user_id):
@@ -267,135 +244,6 @@ class Database:
         except:
             return None
 
-class TempMailTM:
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/ld+json, application/json",
-            "Content-Type": "application/json"
-        })
-        self.token = None
-        self.account_id = None
-        self.email_address = None
-        self.password = None
-        self.provider = "mail.tm"
-
-    def create_account(self) -> dict:
-        try:
-            domains_resp = self.session.get("https://api.mail.tm/domains", timeout=REQUEST_TIMEOUT)
-            if domains_resp.status_code != 200:
-                raise Exception(f"Failed to fetch domains: {domains_resp.status_code}")
-
-            data = domains_resp.json()
-            if isinstance(data, list):
-                domains = data
-            elif "hydra:member" in data:
-                domains = data["hydra:member"]
-            elif "member" in data:
-                domains = data["member"]
-            else:
-                domains = [data] if isinstance(data, dict) else []
-
-            if not domains:
-                raise Exception("No domains available")
-
-            domain = domains[0] if isinstance(domains[0], str) else domains[0].get("domain", "")
-            username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
-            self.email_address = f"{username}@{domain}"
-            self.password = ''.join(random.choices(string.ascii_letters + string.digits + "!@#$%^&*", k=20))
-
-            account_data = {"address": self.email_address, "password": self.password}
-            resp = self.session.post("https://api.mail.tm/accounts", json=account_data, timeout=REQUEST_TIMEOUT)
-            if resp.status_code not in [200, 201]:
-                raise Exception(f"Account creation failed: {resp.status_code}")
-
-            account = resp.json()
-            self.account_id = account.get("id") or account.get("@id")
-
-            token_resp = self.session.post("https://api.mail.tm/token", json=account_data, timeout=REQUEST_TIMEOUT)
-            if token_resp.status_code != 200:
-                raise Exception(f"Token request failed: {token_resp.status_code}")
-
-            token_data = token_resp.json()
-            self.token = token_data.get("token") if isinstance(token_data, dict) else str(token_data)
-            self.session.headers["Authorization"] = f"Bearer {self.token}"
-
-            return {"email": self.email_address, "password": self.password, "id": self.account_id, "provider": self.provider}
-        except requests.Timeout:
-            raise Exception("Connection timeout. Please try again.")
-        except Exception as e:
-            raise Exception(f"Account creation failed: {str(e)}")
-
-    def get_messages(self, page: int = 1) -> list:
-        if not self.token:
-            return []
-        try:
-            resp = self.session.get(f"https://api.mail.tm/messages", params={"page": page}, timeout=REQUEST_TIMEOUT)
-            if resp.status_code != 200:
-                return []
-            data = resp.json()
-            if isinstance(data, list):
-                return data
-            return data.get("hydra:member", data.get("member", []))
-        except:
-            return []
-
-    def get_message(self, message_id: str) -> Optional[dict]:
-        if not self.token:
-            return None
-        try:
-            resp = self.session.get(f"https://api.mail.tm/messages/{message_id}", timeout=REQUEST_TIMEOUT)
-            if resp.status_code != 200:
-                return None
-            return resp.json()
-        except:
-            return None
-
-    def wait_for_otp(self, timeout: int = 120, poll_interval: int = 3) -> Optional[str]:
-        start_time = time.time()
-        seen_ids = set()
-
-        while time.time() - start_time < timeout:
-            try:
-                messages = self.get_messages()
-                for msg in messages:
-                    msg_id = msg.get("id") if isinstance(msg, dict) else None
-                    if not msg_id or msg_id in seen_ids:
-                        continue
-                    seen_ids.add(msg_id)
-
-                    full_msg = self.get_message(msg_id)
-                    if not full_msg:
-                        continue
-
-                    try:
-                        self.session.patch(f"https://api.mail.tm/messages/{msg_id}")
-                    except:
-                        pass
-
-                    subject = full_msg.get("subject", "") if isinstance(full_msg, dict) else ""
-                    text = full_msg.get("text", "") if isinstance(full_msg, dict) else ""
-                    html_list = full_msg.get("html", []) if isinstance(full_msg, dict) else []
-                    html = " ".join(html_list) if isinstance(html_list, list) else str(html_list)
-                    content = f"{subject} {text} {html}"
-
-                    codes = re.findall(r'\b(\d{4,8})\b', content)
-                    for code in codes:
-                        if len(code) == 6:
-                            return code
-            except:
-                pass
-            time.sleep(poll_interval)
-        return None
-
-    def cleanup(self):
-        if self.account_id and self.token:
-            try:
-                self.session.delete(f"https://api.mail.tm/accounts/{self.account_id}")
-            except:
-                pass
-
 class TempMailORG:
     def __init__(self):
         self.session = requests.Session()
@@ -405,12 +253,6 @@ class TempMailORG:
             "Accept-Language": "en-US,en;q=0.9",
             "Origin": "https://temp-mail.org",
             "Referer": "https://temp-mail.org/",
-            "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site",
             "Cache-Control": "no-cache",
             "Pragma": "no-cache"
         })
@@ -427,7 +269,7 @@ class TempMailORG:
             )
 
             if mailbox_resp.status_code not in [200, 201]:
-                raise Exception(f"Mailbox creation failed: {mailbox_resp.status_code}")
+                raise Exception("Failed to create mailbox")
 
             data = mailbox_resp.json()
             self.token = data.get("token")
@@ -439,10 +281,8 @@ class TempMailORG:
             self.session.headers["Authorization"] = f"Bearer {self.token}"
 
             return {"email": self.email_address, "token": self.token, "provider": self.provider}
-        except requests.Timeout:
-            raise Exception("Connection timeout. Please try again.")
-        except Exception as e:
-            raise Exception(f"Account creation failed: {str(e)}")
+        except:
+            raise Exception("Could not create temporary email")
 
     def get_messages(self) -> list:
         if not self.token:
@@ -458,7 +298,7 @@ class TempMailORG:
         except:
             return []
 
-    def wait_for_otp(self, timeout: int = 120, poll_interval: int = 3) -> Optional[str]:
+    def wait_for_otp(self, timeout: int = 180, poll_interval: int = 5) -> Optional[str]:
         start_time = time.time()
         seen_ids = set()
 
@@ -473,12 +313,20 @@ class TempMailORG:
 
                     subject = msg.get("subject", "")
                     body = msg.get("bodyPreview", "")
-                    content = f"{subject} {body}"
-
-                    codes = re.findall(r'\b(\d{4,8})\b', content)
-                    for code in codes:
-                        if len(code) == 6:
-                            return code
+                    html = msg.get("bodyHtml", "")
+                    content = f"{subject} {body} {html}".lower()
+                    
+                    # Look for 6-digit OTP
+                    codes = re.findall(r'\b(\d{6})\b', content)
+                    if codes:
+                        return codes[0]
+                    
+                    # Look for code patterns
+                    if "code" in content or "otp" in content:
+                        codes = re.findall(r'\b(\d{4,8})\b', content)
+                        for code in codes:
+                            if len(code) >= 4 and code.isdigit():
+                                return code
             except:
                 pass
             time.sleep(poll_interval)
@@ -495,8 +343,6 @@ class MusicGPTAPI:
         self.access_token = token
         self.user_id = None
         self.email = None
-        self.device_id = self._gen_id()
-        self.session_id = int(time.time() * 1000)
         self.anonymous_id = self._gen_id()
 
         self.session.cookies.set("anonymous_id", self.anonymous_id, domain=".musicgpt.com")
@@ -505,18 +351,9 @@ class MusicGPTAPI:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
             "Content-Type": "application/json",
             "Origin": "https://musicgpt.com",
-            "Referer": "https://musicgpt.com/",
-            "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "Sec-Fetch-Site": "same-site",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Dest": "empty",
-            "Connection": "keep-alive",
-            "ngrok-skip-browser-warning": "yes"
+            "Referer": "https://musicgpt.com/"
         })
         
         if token:
@@ -599,7 +436,7 @@ class MusicGPTAPI:
             try:
                 data = resp.json()
             except:
-                return {"error": "Invalid JSON response", "success": False}
+                return {"error": "Invalid response", "success": False}
 
             if isinstance(data, dict):
                 inner = data.get("data", data)
@@ -616,10 +453,8 @@ class MusicGPTAPI:
                 "eta": eta,
                 "success": True
             }
-        except requests.Timeout:
-            return {"error": "Request timed out", "success": False}
-        except Exception as e:
-            return {"error": str(e), "success": False}
+        except:
+            return {"error": "Failed to submit prompt", "success": False}
 
     def get_audio(self, audio_id: str) -> Optional[dict]:
         try:
@@ -634,7 +469,6 @@ class MusicGPTAPI:
     def wait_for_audio(self, audio_id: str, eta: int, timeout_extra: int = 300) -> Optional[dict]:
         timeout = eta + timeout_extra
         start_time = time.time()
-        retry_count = 0
         while time.time() - start_time < timeout:
             try:
                 data = self.get_audio(audio_id)
@@ -644,12 +478,8 @@ class MusicGPTAPI:
                         return data
                     elif status == "FAILED":
                         return None
-                retry_count = 0
             except:
-                retry_count += 1
-                if retry_count > 5:
-                    logger.warning("Too many errors getting audio status")
-                    retry_count = 0
+                pass
             time.sleep(3)
         return None
 
@@ -670,7 +500,6 @@ class MusicGPTBot:
     def __init__(self):
         self.api = None
         self.temp_mail = None
-        self.user_commands = {}
         self.bot_username = None
     
     def is_approved(self, user_id):
@@ -688,28 +517,20 @@ class MusicGPTBot:
         return session[0] == 1 if session else False
     
     async def check_channel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Check if message is from channel and if bot is mentioned"""
-        
-        # If private chat - always allowed
         if update.effective_chat.type == ChatType.PRIVATE:
             return True
         
-        # If group/supergroup/channel - check for mention
         if update.effective_chat.type in [ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL]:
-            # Check if bot is mentioned
             if not self.bot_username:
                 self.bot_username = (await context.bot.get_me()).username
             
-            # Check if message contains bot mention
             if update.message:
                 text = update.message.text or update.message.caption or ""
                 mention = f"@{self.bot_username}"
                 
-                # Check if mentioned
                 if mention in text:
                     return True
                 
-                # Check if replying to bot
                 if update.message.reply_to_message:
                     if update.message.reply_to_message.from_user.id == context.bot.id:
                         return True
@@ -718,7 +539,6 @@ class MusicGPTBot:
         return False
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # Check if this is a valid request
         if not await self.check_channel(update, context):
             return
         
@@ -769,36 +589,11 @@ class MusicGPTBot:
             await query.message.reply_text("❌ You need to be approved first. Use /start")
             return
         
-        keyboard = [
-            [InlineKeyboardButton("📧 temp-mail.org", callback_data="login_org")],
-            [InlineKeyboardButton("📧 mail.tm", callback_data="login_tm")],
-            [InlineKeyboardButton("🔙 Back", callback_data="back")]
-        ]
-        
-        await query.message.reply_text(
-            "🔑 **Choose Login Provider**\n\n"
-            "Select which temporary email service to use:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-    
-    async def login_provider_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.check_channel(update, context):
-            return
-        
-        query = update.callback_query
-        await query.answer()
-        user_id = update.effective_user.id
-        provider = query.data.replace("login_", "")
-        
-        status_msg = await query.message.reply_text(f"🔑 Creating email via {provider}...")
+        status_msg = await query.message.reply_text("🔑 Creating temporary email...")
         
         try:
-            if provider == "tm":
-                self.temp_mail = TempMailTM()
-            else:
-                self.temp_mail = TempMailORG()
-            
+            # Auto-login with temp-mail.org
+            self.temp_mail = TempMailORG()
             email_data = self.temp_mail.create_account()
             
             await status_msg.edit_text(f"📧 Email created: `{email_data['email']}`\n\nRequesting OTP...")
@@ -807,7 +602,7 @@ class MusicGPTBot:
             validation_token = self.api.send_otp(email_data["email"])
             
             if not validation_token:
-                await status_msg.edit_text("❌ Failed to send OTP. Try again.")
+                await status_msg.edit_text("❌ Failed to send OTP. Please try again.")
                 return
             
             await status_msg.edit_text(f"📧 Waiting for OTP...\n\nCheck your email: `{email_data['email']}`\n\n⏳ This may take up to 2 minutes...")
@@ -815,15 +610,15 @@ class MusicGPTBot:
             otp = self.temp_mail.wait_for_otp(timeout=180)
             
             if not otp:
-                await status_msg.edit_text("❌ OTP not received. Try again.")
+                await status_msg.edit_text("❌ OTP not received. Please try again.")
                 return
             
-            await status_msg.edit_text(f"✅ OTP received: `{otp}`\n\nVerifying...")
+            await status_msg.edit_text(f"✅ OTP received! Verifying...")
             
             success = self.api.verify_otp(otp, validation_token)
             
             if not success:
-                await status_msg.edit_text("❌ Verification failed.")
+                await status_msg.edit_text("❌ Verification failed. Please try again.")
                 return
             
             username = email_data["email"].split("@")[0]
@@ -833,7 +628,7 @@ class MusicGPTBot:
             
             Database.update_session(
                 user_id, 1, email_data["email"], display_name, 
-                email_data.get("provider", provider), 
+                "temp-mail.org", 
                 self.api.access_token, self.api.user_id
             )
             
@@ -847,7 +642,7 @@ class MusicGPTBot:
                 f"✅ **Login Successful!**\n\n"
                 f"Display: `{display_name}`\n"
                 f"Email: `{email_data['email']}`\n"
-                f"Provider: `{email_data.get('provider', provider)}`\n\n"
+                f"Provider: `temp-mail.org`\n\n"
                 f"🎵 Click **'Generate Music'** to start creating!",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode='Markdown'
@@ -855,7 +650,6 @@ class MusicGPTBot:
             
         except Exception as e:
             await status_msg.edit_text(f"❌ Login error: {str(e)}\n\nPlease try again.")
-            logger.error(f"Login error: {e}")
         finally:
             if self.temp_mail:
                 try:
@@ -898,21 +692,17 @@ class MusicGPTBot:
         context.user_data['awaiting_prompt'] = True
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # Check if bot is mentioned (for groups/channels)
         if not await self.check_channel(update, context):
-            logger.info(f"Ignoring message from {update.effective_chat.type}: {update.effective_chat.id}")
             return
         
         user_id = update.effective_user.id
         text = update.message.text or ""
         
-        # Check if awaiting prompt
         if context.user_data.get('awaiting_prompt'):
             context.user_data['awaiting_prompt'] = False
             await self.process_generation(update, context, text)
             return
         
-        # Only respond if explicitly mentioned or in private
         keyboard = [
             [InlineKeyboardButton("🎵 Generate Music", callback_data="generate")],
             [InlineKeyboardButton("📊 My Status", callback_data="status")],
@@ -958,7 +748,6 @@ class MusicGPTBot:
             safe_title = re.sub(r'_+', '_', safe_title)
             filename = f"{safe_title}_{audio_id[:8]}.mp3"
             
-            os.makedirs("output", exist_ok=True)
             filepath = os.path.join("output", filename)
             
             await status_msg.edit_text(f"📥 Downloading...")
@@ -999,8 +788,7 @@ class MusicGPTBot:
                 await status_msg.edit_text("❌ Download failed.")
                 
         except Exception as e:
-            logger.error(f"Generate error: {e}")
-            await status_msg.edit_text(f"❌ Error: {str(e)}\n\nPlease try again.")
+            await status_msg.edit_text(f"❌ Failed to generate music. Please try again.")
     
     async def play_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.check_channel(update, context):
@@ -1029,7 +817,7 @@ class MusicGPTBot:
                     performer="MusicGPT AI"
                 )
         elif audio_id:
-            await query.message.reply_text(f"🔄 Fetching audio: `{audio_id[:12]}`...", parse_mode='Markdown')
+            await query.message.reply_text(f"🔄 Fetching audio...", parse_mode='Markdown')
             
             session_data = Database.get_session(user_id)
             if not session_data or not session_data[4]:
@@ -1046,7 +834,6 @@ class MusicGPTBot:
                     safe_title = re.sub(r'[^\w\-_\. ]', '_', title)
                     filename = f"{safe_title}_{audio_id[:8]}.mp3"
                     
-                    os.makedirs("output", exist_ok=True)
                     filepath = os.path.join("output", filename)
                     
                     resp = requests.get(download_url, stream=True, timeout=REQUEST_TIMEOUT * 4)
@@ -1282,7 +1069,6 @@ class MusicGPTBot:
         await self.start(update, context)
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # Check if bot is mentioned
         if not await self.check_channel(update, context):
             return
         
@@ -1291,8 +1077,6 @@ class MusicGPTBot:
         
         if data == "login":
             await self.login_callback(update, context)
-        elif data == "login_org" or data == "login_tm":
-            await self.login_provider_callback(update, context)
         elif data == "generate":
             await self.generate_callback(update, context)
         elif data == "play":
@@ -1344,74 +1128,50 @@ class MusicGPTBot:
     
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         error = context.error
-        logger.error(f"Update {update} caused error: {error}")
         
-        # Ignore 409 Conflict errors (bot already running elsewhere)
+        # Only log real errors (not conflicts)
         if "Conflict" in str(error) and "getUpdates" in str(error):
-            logger.warning("Bot conflict detected - another instance is running. This is normal if you're testing.")
             return
         
-        error_message = "❌ An error occurred. Please try again."
-        
-        if isinstance(error, requests.Timeout):
-            error_message = "❌ Request timed out. Please try again."
-        elif isinstance(error, ConnectionError):
-            error_message = "❌ Connection error. Please check your internet."
-        elif "Timed out" in str(error):
-            error_message = "❌ Operation timed out. Please try again."
+        logger.error(f"Update {update} caused error: {error}")
         
         if update and update.effective_message:
             try:
                 keyboard = [[InlineKeyboardButton("🔄 Try Again", callback_data="back")]]
                 await update.effective_message.reply_text(
-                    error_message,
+                    "❌ An error occurred. Please try again.",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             except:
                 pass
 
-# Health check server for Render
+# Health check server
 def run_health_server():
-    """Run a simple HTTP server for Render health checks"""
     try:
-        from flask import Flask, jsonify
-        
         health_app = Flask(__name__)
         
         @health_app.route('/')
         @health_app.route('/health')
         def health():
-            return jsonify({
-                "status": "healthy",
-                "timestamp": datetime.now().isoformat(),
-                "service": "MusicGPT Telegram Bot"
-            }), 200
+            return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()}), 200
         
-        @health_app.route('/ping')
-        def ping():
-            return "pong", 200
-        
-        # Run the health server
         health_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
-    except Exception as e:
-        logger.error(f"Health server error: {e}")
+    except:
+        pass
 
 def main():
     if not TELEGRAM_AVAILABLE:
         print("Install: pip install python-telegram-bot")
         return
     
-    # Start health check server in a separate thread
+    # Start health server
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
-    logger.info(f"Health check server started on port {PORT}")
     
-    # Add a small delay to ensure cleanup of previous instances
     time.sleep(2)
     
     bot = MusicGPTBot()
     
-    # Build application with connection pool settings
     app = Application.builder()\
         .token(BOT_TOKEN)\
         .connect_timeout(30.0)\
@@ -1425,32 +1185,17 @@ def main():
     
     print("✅ Bot started!")
     print(f"👑 Admin ID: {ADMIN_IDS[0] if ADMIN_IDS else 'Not set'}")
-    print(f"🌐 Health check server running on port {PORT}")
-    print("📋 Inline buttons only - no commands needed!")
     print("🎵 MusicGPT integration ready!")
-    print("\n🔒 Channel Protection:")
-    print("  ✅ Private chats: Always responds")
-    print("  ✅ Groups: Only responds when mentioned @botname")
-    print("  ✅ Channels: Only responds when mentioned @botname")
-    print("  ❌ Auto-reply to channels: DISABLED")
-    print("\nFlow:")
-    print("  1. User clicks 'Request Access'")
-    print("  2. Admin approves via button")
-    print("  3. User clicks 'Login' -> chooses provider")
-    print("  4. User clicks 'Generate Music' -> types prompt")
-    print("  5. Bot generates and sends audio")
     
     try:
-        # Use polling with specific settings to avoid conflicts
         app.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
-            stop_signals=None  # Prevents issues with signal handling on Render
+            stop_signals=None
         )
     except KeyboardInterrupt:
         print("\n👋 Bot stopped.")
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
         print(f"❌ Fatal error: {e}")
 
 if __name__ == "__main__":
