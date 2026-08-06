@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from functools import wraps
+import sys
 
 try:
     import uuid
@@ -25,6 +26,7 @@ try:
 except ImportError:
     TELEGRAM_AVAILABLE = False
     print("pip install python-telegram-bot")
+    sys.exit(1)
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +47,9 @@ DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 MAX_RETRIES = 3
 RETRY_DELAY = 5
 REQUEST_TIMEOUT = 30
+
+# Create required directories
+os.makedirs("output", exist_ok=True)
 
 try:
     import asyncio
@@ -1330,6 +1335,11 @@ class MusicGPTBot:
         error = context.error
         logger.error(f"Update {update} caused error: {error}")
         
+        # Ignore 409 Conflict errors (bot already running elsewhere)
+        if "Conflict" in str(error) and "getUpdates" in str(error):
+            logger.warning("Bot conflict detected - another instance is running. This is normal if you're testing.")
+            return
+        
         error_message = "❌ An error occurred. Please try again."
         
         if isinstance(error, requests.Timeout):
@@ -1354,8 +1364,17 @@ def main():
         print("Install: pip install python-telegram-bot")
         return
     
+    # Add a small delay to ensure cleanup of previous instances
+    time.sleep(2)
+    
     bot = MusicGPTBot()
-    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Build application with connection pool settings
+    app = Application.builder()\
+        .token(BOT_TOKEN)\
+        .connect_timeout(30.0)\
+        .read_timeout(30.0)\
+        .build()
     
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CallbackQueryHandler(bot.button_callback))
@@ -1379,7 +1398,12 @@ def main():
     print("  5. Bot generates and sends audio")
     
     try:
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Use polling with specific settings to avoid conflicts
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            stop_signals=None  # Prevents issues with signal handling on Render
+        )
     except KeyboardInterrupt:
         print("\n👋 Bot stopped.")
     except Exception as e:
