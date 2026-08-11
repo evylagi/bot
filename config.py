@@ -16,7 +16,7 @@ ENABLE_API = os.environ.get("ENABLE_API", "true").lower() == "true"
 
 VALID_API_KEYS = {
     "holdenhiscock_sk_api_e8f7d3c1a9b5f6d2": {
-        "owner": "HoldenHisCock",
+        "owner": "JtheDevs",
         "type": "user",
         "status": "active",
         "rate_limit": 50,
@@ -28,8 +28,8 @@ VALID_API_KEYS = {
 REQUEST_COUNTS = {}
 
 DEFAULT_VOICES = {
-    "studio_pro": {
-        "name": "Studio Pro",
+    "J the Devs": {
+        "name": "Kay J the Devs",
         "reference_id": "95496a7632a14321891943545846c31c",
         "emoji": "🎙️",
         "description": "Professional studio quality voice"
