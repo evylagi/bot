@@ -1,7 +1,7 @@
 import os
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8586105261:AAGmyTRAZzQACC_OIee-nGDTQTRBowfz78Y")
-FISH_API_KEY = os.environ.get("FISH_API_KEY", "")
+FISH_API_KEY = os.environ.get("FISH_API_KEY", "sk-fish-2IfHrnq1IG3lhnGoCFVbiNwRrdoR_yM4OXZEb7KfO_g")
 
 BOT_NAME = "VoiceStudio Pro"
 DEV_NAME = "J 🧃"
