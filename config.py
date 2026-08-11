@@ -1,7 +1,7 @@
 import os
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8586105261:AAGmyTRAZzQACC_OIee-nGDTQTRBowfz78Y")
-FISH_API_KEY = os.environ.get("FISH_API_KEY", "sk-fish-2IfHrnq1IG3lhnGoCFVbiNwRrdoR_yM4OXZEb7KfO_g")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8107617495:AAEjCpxJ0qVmG1m7C5rzAU_maM2t9IlnUJs")
+FISH_API_KEY = os.environ.get("FISH_API_KEY", "")
 
 BOT_NAME = "VoiceStudio Pro"
 DEV_NAME = "J 🧃"
@@ -10,7 +10,7 @@ MAX_CHARS = 500
 PORT = int(os.environ.get("PORT", 8080))
 
 VOICES_FILE = "all_voices.json"
-MAX_VOICES = 30
+MAX_VOICES = 20
 
 ENABLE_API = os.environ.get("ENABLE_API", "true").lower() == "true"
 
@@ -20,15 +20,16 @@ VALID_API_KEYS = {
         "type": "user",
         "status": "active",
         "rate_limit": 50,
-        "daily_limit": 50
+        "daily_limit": 50,
+        "emotions_enabled": False
     }
 }
 
 REQUEST_COUNTS = {}
 
 DEFAULT_VOICES = {
-    "J The Devs🤪": {
-        "name": "J the Devs🤪",
+    "studio_pro": {
+        "name": "Studio Pro",
         "reference_id": "95496a7632a14321891943545846c31c",
         "emoji": "🎙️",
         "description": "Professional studio quality voice"
